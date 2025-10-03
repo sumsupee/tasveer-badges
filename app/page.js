@@ -1,0 +1,407 @@
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import { PDFDocument, rgb } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
+import QRCode from 'qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
+
+const NAME_BOX_X = 33.84;
+const NAME_BOX_WIDTH = 220.32;
+const NAME_Y = 233;
+
+const QR_X = 120;
+const QR_Y = 160;
+const QR_SIZE = 50;
+
+export default function Home() {
+  const [formData, setFormData] = useState({
+    name: '',
+    id: '',
+    template: 'TFFM'
+  });
+  const [useBlankBackground, setUseBlankBackground] = useState(true);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [showScanner, setShowScanner] = useState(false);
+  const [scannerLoading, setScannerLoading] = useState(false);
+  const scannerRef = useRef(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    try {
+      const { name, id, template } = formData;
+
+      let pdfDoc;
+
+      if (useBlankBackground) {
+        const templateUrl = `/template_${template}.pdf`;
+        const templateResponse = await fetch(templateUrl);
+        const templatePdfBytes = await templateResponse.arrayBuffer();
+        const tempDoc = await PDFDocument.load(templatePdfBytes);
+        const tempPage = tempDoc.getPages()[0];
+        const { width, height } = tempPage.getSize();
+        
+        pdfDoc = await PDFDocument.create();
+        pdfDoc.addPage([width, height]);
+      } else {
+        const templateUrl = `/template_${template}.pdf`;
+        const templateResponse = await fetch(templateUrl);
+        const templatePdfBytes = await templateResponse.arrayBuffer();
+        pdfDoc = await PDFDocument.load(templatePdfBytes);
+      }
+
+      let font;
+      try {
+        const fontResponse = await fetch('/BebasNeue-Regular.ttf');
+        if (!fontResponse.ok) throw new Error('Font not found');
+        
+        const fontBytes = await fontResponse.arrayBuffer();
+        
+        pdfDoc.registerFontkit(fontkit);
+        
+        font = await pdfDoc.embedFont(fontBytes, { subset: true });
+      } catch (err) {
+        font = await pdfDoc.embedFont('Helvetica-Bold');
+      }
+
+      const pages = pdfDoc.getPages();
+      const firstPage = pages[0];
+
+      const nameCenterX = NAME_BOX_X + (NAME_BOX_WIDTH / 2);
+      const fontSize = 24;
+
+      const textWidth = font.widthOfTextAtSize(name, fontSize);
+      const textX = nameCenterX - (textWidth / 2);
+
+      firstPage.drawText(name, {
+        x: textX,
+        y: NAME_Y,
+        size: fontSize,
+        font: font,
+        color: rgb(0, 0, 0),
+      });
+
+      const qrCodeDataUrl = await QRCode.toDataURL(id.toString(), {
+        width: QR_SIZE * 2,
+        margin: 1,
+      });
+
+      const qrCodeBase64 = qrCodeDataUrl.split(',')[1];
+      const qrCodeBytes = Uint8Array.from(atob(qrCodeBase64), c => c.charCodeAt(0));
+
+      const qrImage = await pdfDoc.embedPng(qrCodeBytes);
+
+      firstPage.drawImage(qrImage, {
+        x: QR_X,
+        y: QR_Y,
+        width: QR_SIZE,
+        height: QR_SIZE,
+      });
+
+      const pdfBytes = await pdfDoc.save();
+
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      
+      const printWindow = window.open(url, '_blank');
+      
+      if (printWindow) {
+        printWindow.onload = () => {
+          printWindow.print();
+        };
+        
+        setTimeout(() => {
+          window.URL.revokeObjectURL(url);
+        }, 1000);
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `badge_${name.replace(/\s+/g, '_')}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }
+
+      setFormData({
+        name: '',
+        id: '',
+        template: formData.template
+      });
+    } catch (err) {
+      setError(err.message || 'Failed to generate badge');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChange = (e) => {
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value
+    });
+  };
+
+  useEffect(() => {
+    if (showScanner && !scannerRef.current) {
+      setScannerLoading(true);
+      const scanner = new Html5Qrcode('qr-reader');
+
+      const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 }
+      };
+
+      scanner.start(
+        { facingMode: "environment" },
+        config,
+        (decodedText) => {
+          setFormData((prev) => ({
+            ...prev,
+            id: decodedText
+          }));
+          setShowScanner(false);
+          setScannerLoading(false);
+          scanner.stop().then(() => {
+            scanner.clear();
+            scannerRef.current = null;
+          }).catch(console.error);
+        },
+        () => {}
+      ).then(() => {
+        setScannerLoading(false);
+      }).catch(() => {
+        scanner.start(
+          { facingMode: "user" },
+          config,
+          (decodedText) => {
+            setFormData((prev) => ({
+              ...prev,
+              id: decodedText
+            }));
+            setShowScanner(false);
+            setScannerLoading(false);
+            scanner.stop().then(() => {
+              scanner.clear();
+              scannerRef.current = null;
+            }).catch(console.error);
+          },
+          () => {}
+        ).then(() => {
+          setScannerLoading(false);
+        }).catch(() => {
+          setScannerLoading(false);
+          setError('Unable to access camera. Please check permissions.');
+        });
+      });
+
+      scannerRef.current = scanner;
+    }
+
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.stop().then(() => {
+          scannerRef.current.clear();
+          scannerRef.current = null;
+          setScannerLoading(false);
+        }).catch(console.error);
+      }
+    };
+  }, [showScanner]);
+
+  const handleScanClick = () => {
+    setShowScanner(true);
+  };
+
+  const handleCloseScanner = () => {
+    setShowScanner(false);
+    setScannerLoading(false);
+    if (scannerRef.current) {
+      scannerRef.current.stop().then(() => {
+        scannerRef.current.clear();
+        scannerRef.current = null;
+      }).catch(console.error);
+    }
+  };
+
+  return (
+    <main className="min-h-screen flex items-center justify-center p-3 sm:p-4 md:p-6">
+      <div className="bg-white rounded-lg sm:rounded-xl shadow-2xl p-4 sm:p-6 md:p-8 w-full max-w-md border border-teal-100">
+        <div className="flex justify-center mb-4 sm:mb-6">
+          <img 
+            src="/tasveer-20yrs.webp" 
+            alt="Tasveer 20 Years" 
+            className="h-12 sm:h-14 md:h-16 w-auto"
+          />
+        </div>
+        
+        <h1 className="font-[family-name:var(--font-bebas-neue)] text-3xl sm:text-4xl md:text-5xl text-center mb-6 sm:mb-8 text-teal-700 tracking-wider">
+          Tasveer Badge Printer
+        </h1>
+
+        <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
+          <div>
+            <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1.5 sm:mb-2">
+              Name
+            </label>
+            <input
+              type="text"
+              id="name"
+              name="name"
+              value={formData.name}
+              onChange={handleChange}
+              className="w-full px-3 sm:px-4 py-2 sm:py-2.5 border border-teal-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-transparent text-base"
+              placeholder="Enter person's name"
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="id" className="block text-sm font-medium text-gray-700 mb-1.5 sm:mb-2">
+              ID (for QR Code)
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                id="id"
+                name="id"
+                value={formData.id}
+                onChange={handleChange}
+                className="w-full px-3 sm:px-4 py-2 sm:py-2.5 pr-10 sm:pr-12 border border-teal-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-transparent text-base"
+                placeholder="Enter ID number"
+                required
+              />
+              <button
+                type="button"
+                onClick={handleScanClick}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-teal-600 hover:text-teal-800 hover:bg-teal-50 rounded transition-colors"
+                title="Scan QR Code"
+              >
+                <svg
+                  className="w-5 h-5 sm:w-6 sm:h-6"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-3 sm:px-4 py-2.5 sm:py-3 rounded-md text-sm">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-teal-600 text-white py-2.5 sm:py-3 px-4 rounded-md hover:bg-teal-700 active:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium text-base"
+          >
+            {loading ? 'Preparing...' : 'Print Badge'}
+          </button>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="p-2 text-teal-600 hover:text-teal-800 active:text-teal-900 hover:bg-teal-50 rounded-md transition-colors touch-manipulation"
+              title="Advanced Settings"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+            
+            {showAdvanced && (
+              <div className="mt-2 p-3 sm:p-4 border border-teal-200 rounded-md bg-teal-50 space-y-3 sm:space-y-4">
+                <div>
+                  <label htmlFor="template" className="block text-sm font-medium text-gray-700 mb-1.5 sm:mb-2">
+                    Template Dimensions
+                  </label>
+                  <select
+                    id="template"
+                    name="template"
+                    value={formData.template}
+                    onChange={handleChange}
+                    className="w-full px-3 py-2 border border-teal-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm bg-white"
+                    required
+                  >
+                    <option value="TFFM">TFFM</option>
+                    <option value="TFF">TFF</option>
+                    <option value="TFM">TFM</option>
+                  </select>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Determines the PDF size and element positions
+                  </p>
+                </div>
+
+                <div className="flex items-start sm:items-center">
+                  <input
+                    type="checkbox"
+                    id="useBlankBackground"
+                    checked={useBlankBackground}
+                    onChange={(e) => setUseBlankBackground(e.target.checked)}
+                    className="w-4 h-4 mt-0.5 sm:mt-0 text-teal-600 border-teal-300 rounded focus:ring-teal-500 flex-shrink-0"
+                  />
+                  <label htmlFor="useBlankBackground" className="ml-2 text-sm text-gray-700 leading-tight sm:leading-normal">
+                    Use blank background (uncheck to use template design)
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
+        </form>
+
+        <div className="mt-4 sm:mt-6 text-center text-teal-600">
+          <p className="text-xs leading-relaxed">Made for <a href="https://tasveer.org" target="_blank" rel="noopener noreferrer" className="font-semibold hover:text-teal-800 active:text-teal-900">Tasveer</a> by <a href="https://www.sumedhsupe.com" target="_blank" rel="noopener noreferrer" className="font-semibold hover:text-teal-800 active:text-teal-900">Sumedh</a></p>
+        </div>
+      </div>
+
+      {showScanner && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-md relative">
+            <button
+              onClick={handleCloseScanner}
+              className="absolute top-2 right-2 text-gray-500 hover:text-gray-700 p-2 z-10"
+              aria-label="Close scanner"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <h2 className="text-xl font-semibold mb-4 text-teal-700">Scan QR Code</h2>
+            
+            {scannerLoading && (
+              <div className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600 mb-4"></div>
+                  <p className="text-gray-600">Starting camera...</p>
+                </div>
+              </div>
+            )}
+            
+            <div id="qr-reader" className="w-full min-h-[300px] flex items-center justify-center bg-black rounded-lg overflow-hidden"></div>
+            
+            <p className="mt-4 text-sm text-gray-600 text-center">
+              Position the QR code within the scanning frame
+            </p>
+          </div>
+        </div>
+      )}
+    </main>
+  );
+}
