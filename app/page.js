@@ -22,6 +22,7 @@ export default function Home() {
   });
   const [useBlankBackground, setUseBlankBackground] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [useA4, setUseA4] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showScanner, setShowScanner] = useState(false);
@@ -103,6 +104,38 @@ export default function Home() {
         height: QR_SIZE,
       });
 
+      // Handle A4 printing if enabled
+      if (useA4) {
+        const templatePage = firstPage;
+        const templateSize = templatePage.getSize();
+        
+        // A4 size in points: 595.28 x 841.89
+        const A4_WIDTH = 595.28;
+        const A4_HEIGHT = 841.89;
+        
+        // Create a new PDF document with A4 size
+        const a4PdfDoc = await PDFDocument.create();
+        const a4Page = a4PdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
+        
+        // Embed the current page as a form object
+        const [embeddedPage] = await a4PdfDoc.embedPdf(await pdfDoc.save(), [0]);
+        
+        // Calculate position: center horizontally, align to top
+        const xOffset = (A4_WIDTH - templateSize.width) / 2;
+        const yOffset = A4_HEIGHT - templateSize.height;
+        
+        // Draw the embedded page on the A4 page
+        a4Page.drawPage(embeddedPage, {
+          x: xOffset,
+          y: yOffset,
+          width: templateSize.width,
+          height: templateSize.height,
+        });
+        
+        // Replace the original PDF doc with the A4 one
+        pdfDoc = a4PdfDoc;
+      }
+
       const pdfBytes = await pdfDoc.save();
 
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
@@ -165,12 +198,17 @@ export default function Home() {
             ...prev,
             id: decodedText
           }));
-          setShowScanner(false);
           setScannerLoading(false);
-          scanner.stop().then(() => {
-            scanner.clear();
-            scannerRef.current = null;
-          }).catch(console.error);
+          scanner.stop()
+            .then(() => {
+              scanner.clear();
+              scannerRef.current = null;
+              setShowScanner(false);
+            })
+            .catch(() => {
+              scannerRef.current = null;
+              setShowScanner(false);
+            });
         },
         () => {}
       ).then(() => {
@@ -184,12 +222,17 @@ export default function Home() {
               ...prev,
               id: decodedText
             }));
-            setShowScanner(false);
             setScannerLoading(false);
-            scanner.stop().then(() => {
-              scanner.clear();
-              scannerRef.current = null;
-            }).catch(console.error);
+            scanner.stop()
+              .then(() => {
+                scanner.clear();
+                scannerRef.current = null;
+                setShowScanner(false);
+              })
+              .catch(() => {
+                scannerRef.current = null;
+                setShowScanner(false);
+              });
           },
           () => {}
         ).then(() => {
@@ -205,11 +248,18 @@ export default function Home() {
 
     return () => {
       if (scannerRef.current) {
-        scannerRef.current.stop().then(() => {
-          scannerRef.current.clear();
-          scannerRef.current = null;
-          setScannerLoading(false);
-        }).catch(console.error);
+        scannerRef.current.stop()
+          .then(() => {
+            if (scannerRef.current) {
+              scannerRef.current.clear();
+              scannerRef.current = null;
+            }
+            setScannerLoading(false);
+          })
+          .catch(() => {
+            scannerRef.current = null;
+            setScannerLoading(false);
+          });
       }
     };
   }, [showScanner]);
@@ -218,15 +268,20 @@ export default function Home() {
     setShowScanner(true);
   };
 
-  const handleCloseScanner = () => {
-    setShowScanner(false);
+  const handleCloseScanner = async () => {
     setScannerLoading(false);
     if (scannerRef.current) {
-      scannerRef.current.stop().then(() => {
+      try {
+        await scannerRef.current.stop();
         scannerRef.current.clear();
+      } catch (error) {
+        // Ignore errors when stopping scanner
+      } finally {
         scannerRef.current = null;
-      }).catch(console.error);
+      }
     }
+    setShowScanner(false);
+    setError('');
   };
 
   return (
@@ -337,7 +392,7 @@ export default function Home() {
                     name="template"
                     value={formData.template}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-teal-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm bg-white"
+                    className="w-full px-3 py-2 border border-teal-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm bg-white font-sans"
                     required
                   >
                     <option value="TFFM">TFFM</option>
@@ -360,6 +415,45 @@ export default function Home() {
                   <label htmlFor="useBlankBackground" className="ml-2 text-sm text-gray-700 leading-tight sm:leading-normal">
                     Use blank background (uncheck to use template design)
                   </label>
+                </div>
+
+                <div className="pt-2 border-t border-teal-200">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Page Size</h3>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1">
+                      <label className="text-sm text-gray-700">A4 Format</label>
+                      <div className="relative group">
+                        <svg 
+                          className="w-4 h-4 text-gray-400 cursor-help"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover:block z-10 w-56">
+                          <div className="bg-gray-900 text-white text-xs rounded-md py-2 px-3 shadow-lg">
+                            Turn it off if you have custom sizes set up on your printer. 
+                            <div className="absolute left-1/2 -translate-x-1/2 top-full -mt-1 border-4 border-transparent border-t-gray-900"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setUseA4(!useA4)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2 ${
+                        useA4 ? 'bg-teal-600' : 'bg-gray-300'
+                      }`}
+                      title="Toggle A4 Print Format"
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          useA4 ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
