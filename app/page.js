@@ -207,6 +207,9 @@ export default function Home() {
         id: '',
         template: formData.template
       });
+      // Clear verification result after printing
+      setVerificationResult(null);
+      setSelectedBadge(null);
     } catch (err) {
       setError(err.message || 'Failed to generate badge');
     } finally {
@@ -492,7 +495,7 @@ export default function Home() {
       // Show success message
       alert(`Badge picked up successfully!\n\nName: ${formData.name}\nID: ${formData.id}\nTime: ${new Date(data.pickup.pickedUpAt).toLocaleString()}`);
       
-      // Clear form
+      // Clear form and verification result
       setFormData({
         name: '',
         id: '',
@@ -500,6 +503,7 @@ export default function Home() {
       });
       setSearchQuery('');
       setSelectedBadge(null);
+      setVerificationResult(null);
     } catch (err) {
       setError(err.message || 'Failed to mark badge as picked up');
       // Refresh pickups even on error to get latest state
@@ -711,7 +715,7 @@ export default function Home() {
 
           <div>
             <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1.5 sm:mb-2">
-              Name
+              Print Name
             </label>
             <input
               type="text"
@@ -727,7 +731,7 @@ export default function Home() {
 
           <div>
             <label htmlFor="id" className="block text-sm font-medium text-gray-700 mb-1.5 sm:mb-2">
-              ID (for QR Code)
+              Scan ID (for QR Code)
             </label>
             <div className="relative">
               <input
