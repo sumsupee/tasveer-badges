@@ -28,6 +28,39 @@ export default function Home() {
   const [showScanner, setShowScanner] = useState(false);
   const [scannerLoading, setScannerLoading] = useState(false);
   const scannerRef = useRef(null);
+  
+  // Search functionality
+  const [searchQuery, setSearchQuery] = useState('');
+  const [passes, setPasses] = useState([]);
+  const [filteredPasses, setFilteredPasses] = useState([]);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchRef = useRef(null);
+  const [selectedBadge, setSelectedBadge] = useState(null);
+
+  // Map badge names to template codes
+  const getTemplateFromBadgeName = (badgeName) => {
+    if (!badgeName) return 'TFFM';
+    
+    const badgeNameLower = badgeName.toLowerCase();
+    
+    if (badgeNameLower.includes('tff badge')) return 'TFF';
+    if (badgeNameLower.includes('tfm badge')) return 'TFM';
+    if (badgeNameLower.includes('tffm')) return 'TFFM';
+    
+    // Default to TFFM
+    return 'TFFM';
+  };
+
+  // Map template codes to colors
+  const getTemplateColor = (templateCode) => {
+    const colorMap = {
+      'TFFM': 'Yellow',
+      'TFF': 'Pink',
+      'TFM': 'Blue'
+    };
+    return colorMap[templateCode] || 'Yellow';
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -284,6 +317,93 @@ export default function Home() {
     setError('');
   };
 
+  // Fetch passes data from API
+  useEffect(() => {
+    const fetchPasses = async () => {
+      setSearchLoading(true);
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_EVENTIVE_API_URL;
+        if (!apiUrl) {
+          console.error('API URL not configured');
+          return;
+        }
+        
+        const response = await fetch(apiUrl);
+        if (!response.ok) {
+          throw new Error('Failed to fetch passes');
+        }
+        
+        const data = await response.json();
+        setPasses(data.passes || []);
+      } catch (err) {
+        console.error('Error fetching passes:', err);
+      } finally {
+        setSearchLoading(false);
+      }
+    };
+
+    fetchPasses();
+  }, []);
+
+  // Handle search input
+  const handleSearchChange = (e) => {
+    const query = e.target.value;
+    setSearchQuery(query);
+
+    if (query.trim() === '') {
+      setFilteredPasses([]);
+      setShowSearchResults(false);
+      return;
+    }
+
+    // Filter passes by person.name or person.email
+    const filtered = passes.filter((pass) => {
+      const name = pass.person?.name?.toLowerCase() || '';
+      const email = pass.person?.email?.toLowerCase() || '';
+      const searchTerm = query.toLowerCase();
+      
+      return name.includes(searchTerm) || email.includes(searchTerm);
+    });
+
+    setFilteredPasses(filtered);
+    setShowSearchResults(true);
+  };
+
+  // Handle selecting a person from search results
+  const handleSelectPerson = (pass) => {
+    const displayName = pass.person?.name || pass.person?.email || '';
+    const badgeName = pass.pass_bucket?.name || '';
+    const template = getTemplateFromBadgeName(badgeName);
+    
+    setFormData({
+      ...formData,
+      name: displayName,
+      id: pass.id || '',
+      template: template
+    });
+    setSearchQuery(displayName);
+    setSelectedBadge({
+      name: badgeName,
+      template: template
+    });
+    setShowSearchResults(false);
+    setFilteredPasses([]);
+  };
+
+  // Close search results when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (searchRef.current && !searchRef.current.contains(event.target)) {
+        setShowSearchResults(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
   return (
     <main className="min-h-screen flex items-center justify-center p-3 sm:p-4 md:p-6">
       <div className="bg-white rounded-lg sm:rounded-xl shadow-2xl p-4 sm:p-6 md:p-8 w-full max-w-md border border-teal-100">
@@ -300,6 +420,70 @@ export default function Home() {
         </h1>
 
         <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
+          {/* Search Bar */}
+          <div className="relative" ref={searchRef}>
+            <label htmlFor="search" className="block text-sm font-medium text-gray-700 mb-1.5 sm:mb-2">
+              Search Person
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                id="search"
+                value={searchQuery}
+                onChange={handleSearchChange}
+                onFocus={() => {
+                  if (filteredPasses.length > 0) {
+                    setShowSearchResults(true);
+                  }
+                }}
+                className="w-full px-3 sm:px-4 py-2 sm:py-2.5 pr-10 border border-teal-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-transparent text-base"
+                placeholder="Search by name or email..."
+              />
+              {searchLoading ? (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-teal-600"></div>
+                </div>
+              ) : (
+                <svg
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              )}
+            </div>
+
+            {/* Search Results Dropdown */}
+            {showSearchResults && filteredPasses.length > 0 && (
+              <div className="absolute z-10 w-full mt-1 bg-white border border-teal-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                {filteredPasses.map((pass) => (
+                  <button
+                    key={pass.id}
+                    type="button"
+                    onClick={() => handleSelectPerson(pass)}
+                    className="w-full px-3 sm:px-4 py-2.5 text-left hover:bg-teal-50 border-b border-teal-100 last:border-b-0 transition-colors"
+                  >
+                    <div className="font-medium text-gray-900">
+                      {pass.person?.name || pass.person?.email || 'Unknown'}
+                    </div>
+                    {pass.person?.name && (
+                      <div className="text-sm text-gray-500">{pass.person?.email}</div>
+                    )}
+                    <div className="text-xs text-teal-600 mt-0.5">{pass.pass_bucket?.name}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {showSearchResults && filteredPasses.length === 0 && searchQuery.trim() !== '' && (
+              <div className="absolute z-10 w-full mt-1 bg-white border border-teal-300 rounded-md shadow-lg p-4 text-center text-gray-500 text-sm">
+                No results found
+              </div>
+            )}
+          </div>
+
           <div>
             <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1.5 sm:mb-2">
               Name
@@ -348,6 +532,28 @@ export default function Home() {
               </button>
             </div>
           </div>
+
+          {/* Print On Section */}
+          {selectedBadge && (
+            <div className="bg-teal-50 border-2 border-teal-200 rounded-lg p-4">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Print On:</h3>
+              <div className="flex items-center gap-4">
+                <div className="flex-shrink-0">
+                  <img
+                    src={`/template_${selectedBadge.template}.png`}
+                    alt={`${selectedBadge.name} template`}
+                    className="w-20 h-auto border border-teal-300 rounded shadow-sm"
+                  />
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium text-teal-900">
+    
+                    Template: {selectedBadge.template} - <span className="font-semibold">{getTemplateColor(selectedBadge.template)}</span>
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-3 sm:px-4 py-2.5 sm:py-3 rounded-md text-sm">
