@@ -13,6 +13,8 @@
 # production
 /build
 
+/venv
+
 # misc
 .DS_Store
 *.pem
@@ -25,6 +27,8 @@ yarn-error.log*
 # local env files
 .env*.local
 .env
+
+.eslintrc.json
 
 # vercel
 .vercel
