@@ -370,8 +370,11 @@ export default function Home() {
       return;
     }
 
+    // Refresh pickups first to get latest data from other users
+    await fetchPickups();
+
     if (isPickedUp(formData.id)) {
-      setError('This badge has already been picked up');
+      setError('This badge has already been picked up by someone else');
       return;
     }
 
@@ -397,7 +400,7 @@ export default function Home() {
 
       const data = await response.json();
       
-      // Refresh pickups list
+      // Refresh pickups list immediately to update UI
       await fetchPickups();
       
       // Show success message
@@ -413,6 +416,8 @@ export default function Home() {
       setSelectedBadge(null);
     } catch (err) {
       setError(err.message || 'Failed to mark badge as picked up');
+      // Refresh pickups even on error to get latest state
+      await fetchPickups();
     } finally {
       setPickupLoading(false);
     }
@@ -421,6 +426,15 @@ export default function Home() {
   useEffect(() => {
     fetchPasses();
     fetchPickups();
+
+    // Auto-refresh pickups every 10 seconds to catch updates from other users
+    const pickupInterval = setInterval(() => {
+      fetchPickups();
+    }, 10000); // 10 seconds
+
+    return () => {
+      clearInterval(pickupInterval);
+    };
   }, []);
 
   // Handle search input
@@ -506,7 +520,10 @@ export default function Home() {
               </label>
               <button
                 type="button"
-                onClick={fetchPasses}
+                onClick={() => {
+                  fetchPasses();
+                  fetchPickups();
+                }}
                 disabled={searchLoading}
                 className="flex items-center gap-1 text-xs text-teal-600 hover:text-teal-800 disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Refresh data"

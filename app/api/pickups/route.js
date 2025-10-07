@@ -1,13 +1,33 @@
 import { NextResponse } from 'next/server';
-import { kv } from '@vercel/kv';
+import { createClient } from 'redis';
 
 const PICKUPS_KEY = 'badge:pickups';
+
+// Create Redis client
+let redisClient = null;
+
+async function getRedisClient() {
+  if (!redisClient) {
+    redisClient = createClient({
+      url: process.env.REDIS_URL
+    });
+
+    redisClient.on('error', (err) => console.error('Redis Client Error', err));
+    
+    await redisClient.connect();
+  }
+  
+  return redisClient;
+}
 
 // GET - Retrieve all pickups
 export async function GET() {
   try {
-    const pickups = await kv.get(PICKUPS_KEY);
-    return NextResponse.json({ pickups: pickups || [] });
+    const client = await getRedisClient();
+    const data = await client.get(PICKUPS_KEY);
+    const pickups = data ? JSON.parse(data) : [];
+    
+    return NextResponse.json({ pickups });
   } catch (error) {
     console.error('Error reading pickups:', error);
     return NextResponse.json(
@@ -30,8 +50,11 @@ export async function POST(request) {
       );
     }
 
+    const client = await getRedisClient();
+    
     // Get existing pickups
-    const pickups = (await kv.get(PICKUPS_KEY)) || [];
+    const data = await client.get(PICKUPS_KEY);
+    const pickups = data ? JSON.parse(data) : [];
 
     // Check if already picked up
     const existingPickup = pickups.find(p => p.id === id);
@@ -52,8 +75,8 @@ export async function POST(request) {
 
     pickups.push(newPickup);
 
-    // Save to Vercel KV
-    await kv.set(PICKUPS_KEY, pickups);
+    // Save to Redis
+    await client.set(PICKUPS_KEY, JSON.stringify(pickups));
 
     return NextResponse.json({ 
       message: 'Badge marked as picked up',
