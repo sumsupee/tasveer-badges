@@ -318,30 +318,28 @@ export default function Home() {
   };
 
   // Fetch passes data from API
-  useEffect(() => {
-    const fetchPasses = async () => {
-      setSearchLoading(true);
-      try {
-        const apiUrl = process.env.NEXT_PUBLIC_EVENTIVE_API_URL;
-        if (!apiUrl) {
-          console.error('API URL not configured');
-          return;
-        }
-        
-        const response = await fetch(apiUrl);
-        if (!response.ok) {
-          throw new Error('Failed to fetch passes');
-        }
-        
-        const data = await response.json();
-        setPasses(data.passes || []);
-      } catch (err) {
-        console.error('Error fetching passes:', err);
-      } finally {
-        setSearchLoading(false);
+  const fetchPasses = async () => {
+    setSearchLoading(true);
+    try {
+      const response = await fetch('/api/passes', {
+        // Ensure we always get fresh data
+        cache: 'no-store'
+      });
+      if (!response.ok) {
+        throw new Error('Failed to fetch passes');
       }
-    };
+      
+      const data = await response.json();
+      setPasses(data.passes || []);
+    } catch (err) {
+      console.error('Error fetching passes:', err);
+      setError('Failed to load passes data. Please try refreshing.');
+    } finally {
+      setSearchLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchPasses();
   }, []);
 
@@ -422,9 +420,28 @@ export default function Home() {
         <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
           {/* Search Bar */}
           <div className="relative" ref={searchRef}>
-            <label htmlFor="search" className="block text-sm font-medium text-gray-700 mb-1.5 sm:mb-2">
-              Search Person
-            </label>
+            <div className="flex items-center justify-between mb-1.5 sm:mb-2">
+              <label htmlFor="search" className="block text-sm font-medium text-gray-700">
+                Search Person
+              </label>
+              <button
+                type="button"
+                onClick={fetchPasses}
+                disabled={searchLoading}
+                className="flex items-center gap-1 text-xs text-teal-600 hover:text-teal-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Refresh data"
+              >
+                <svg
+                  className={`w-4 h-4 ${searchLoading ? 'animate-spin' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span>Refresh</span>
+              </button>
+            </div>
             <div className="relative">
               <input
                 type="text"
